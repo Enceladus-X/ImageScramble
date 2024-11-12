@@ -21,14 +21,14 @@ export default function App() {
   const displayImageOnCanvas = (src) => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const image = new Image();
+    const image = new window.Image();
     image.src = src;
 
     image.onload = () => {
       canvas.width = image.width;
       canvas.height = image.height;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);  // 캔버스 초기화
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);  // 이미지 표시
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     };
   };
 
@@ -37,10 +37,12 @@ export default function App() {
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const image = new Image();
+    const image = new window.Image();
     image.src = imageSrc;
 
     image.onload = () => {
+      canvas.width = image.width;
+      canvas.height = image.height;
       const { width, height } = canvas;
       const cols = 8;
       const rows = 8;
@@ -75,7 +77,8 @@ export default function App() {
         ctx.putImageData(piece, col * pieceWidth, row * pieceHeight);
       });
 
-      setScrambledImageSrc(canvas.toDataURL());  // 섞인 이미지 저장
+      // 암호화된 이미지를 별도의 상태로 저장
+      setScrambledImageSrc(canvas.toDataURL());
     };
   };
 
@@ -103,70 +106,167 @@ export default function App() {
     link.click();
   };
 
+  const decryptImage = () => {
+    if (!scrambledImageSrc && !imageSrc) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const image = new Image();
+    image.src = scrambledImageSrc || imageSrc;
+
+    image.onload = () => {
+      const { width, height } = canvas;
+      const cols = 8;
+      const rows = 8;
+      const pieceWidth = Math.floor(width / cols);
+      const pieceHeight = Math.floor(height / rows);
+
+      // 현재 이미지 조각 저장
+      let imagePieces = [];
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const piece = ctx.getImageData(col * pieceWidth, row * pieceHeight, pieceWidth, pieceHeight);
+          imagePieces.push({ piece, originalIndex: row * cols + col });
+        }
+      }
+
+      // 시드 기반으로 원래 위치 계산
+      const seedValue = parseInt(seed) || 1;
+      const random = seededRandom(seedValue);
+      let indices = Array.from({ length: rows * cols }, (_, i) => i);
+      
+      // 암호화때 사용한 것과 동일한 셔플 과정 수행
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+
+      // 역매핑 생성
+      let reverseIndices = Array(indices.length);
+      indices.forEach((newPos, originalPos) => {
+        reverseIndices[newPos] = originalPos;
+      });
+
+      // 조각들을 원래 위치로 복원
+      ctx.clearRect(0, 0, width, height);
+      imagePieces.forEach(({ piece }, currentIndex) => {
+        const originalPos = reverseIndices[currentIndex];
+        const col = originalPos % cols;
+        const row = Math.floor(originalPos / cols);
+        ctx.putImageData(piece, col * pieceWidth, row * pieceHeight);
+      });
+
+      setImageSrc(canvas.toDataURL());
+      setScrambledImageSrc(null);
+    };
+  };
+
   return (
     <ChakraProvider>
       <Box textAlign="center" p={5}>
         <Text fontSize="xl" mb={4}>이미지를 업로드하거나 암호화된 이미지를 복호화하세요</Text>
 
-        {/* 이미지 업로드 및 미리보기 박스 */}
-        <Box
-          border="2px dashed #ccc"
-          borderRadius="md"
-          width="400px"
-          height="400px"
-          mx="auto"
-          mb={4}
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          cursor="pointer"
-          position="relative"
-          onClick={() => document.getElementById('fileInput').click()}
-        >
-          {!imageSrc && !scrambledImageSrc && (
-            <Text fontSize="lg" color="gray.500">이미지를 업로드하려면 클릭하세요</Text>
-          )}
-          {(imageSrc || scrambledImageSrc) && (
-            <Image
-              src={scrambledImageSrc || imageSrc}
-              alt="Uploaded"
-              objectFit="contain"
-              maxWidth="100%"
-              maxHeight="100%"
+        {/* 이미지 컨테이너를 나란히 배치 */}
+        <Box display="flex" justifyContent="center" gap={8} mb={4}>
+          {/* 원본 이미지 업로드 박스 */}
+          <Box
+            border="2px dashed #ccc"
+            borderRadius="md"
+            width="400px"
+            height="400px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            cursor="pointer"
+            position="relative"
+            onClick={() => document.getElementById('fileInput').click()}
+          >
+            {!imageSrc ? (
+              <Text fontSize="lg" color="gray.500">이미지를 업로드하려면 클릭하세요</Text>
+            ) : (
+              <Image
+                src={imageSrc}
+                alt="Original"
+                objectFit="contain"
+                maxWidth="100%"
+                maxHeight="100%"
+              />
+            )}
+            <Input
+              id="fileInput"
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              display="none"
             />
-          )}
-          <Input
-            id="fileInput"
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            display="none"
-          />
+          </Box>
+
+          {/* 암호화/복호화된 이미지 표시 박스 */}
+          <Box
+            border="2px dashed #ccc"
+            borderRadius="md"
+            width="400px"
+            height="400px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            position="relative"
+          >
+            {scrambledImageSrc ? (
+              <Image
+                src={scrambledImageSrc}
+                alt="Scrambled"
+                objectFit="contain"
+                maxWidth="100%"
+                maxHeight="100%"
+              />
+            ) : (
+              <Text fontSize="lg" color="gray.500">암호화된 이미지가 여기에 표시됩니다</Text>
+            )}
+          </Box>
         </Box>
 
-        {/* 시드 입력 필드 */}
-        <Text fontSize="xl" mb={4}>시드 값을 입력하세요 (자연수)</Text>
-        <Input
-          placeholder="Seed 입력"
-          value={seed}
-          onChange={handleSeedChange}
-          mb={4}
+        {/* 숨겨진 캔버스 */}
+        <canvas
+          ref={canvasRef}
+          style={{ display: 'none' }}
         />
 
-        {/* 변환 및 복호화 버튼 */}
-        <Button colorScheme="teal" onClick={scrambleImage} mb={4} isDisabled={!seed || !imageSrc}>
-          이미지 암호화
-        </Button>
+        {/* 컨트롤 패널 */}
+        <Box maxWidth="800px" mx="auto">
+          <Text fontSize="xl" mb={4}>시드 값을 입력하세요 (자연수)</Text>
+          <Input
+            placeholder="Seed 입력"
+            value={seed}
+            onChange={handleSeedChange}
+            mb={4}
+            maxWidth="400px"
+          />
 
-        {scrambledImageSrc && (
-          <Button colorScheme="blue" onClick={downloadImage} mb={4}>
-            암호화된 이미지 다운로드
-          </Button>
-        )}
+          <Box display="flex" justifyContent="center" gap={4}>
+            <Button 
+              colorScheme="teal" 
+              onClick={scrambleImage} 
+              isDisabled={!seed || !imageSrc}
+            >
+              이미지 암호화
+            </Button>
 
-        <Button colorScheme="green" onClick={() => {}} mb={4} isDisabled={!scrambledImageSrc && !imageSrc}>
-          이미지 복호화
-        </Button>
+            {imageSrc && (
+              <Button colorScheme="blue" onClick={downloadImage}>
+                이미지 다운로드
+              </Button>
+            )}
+
+            <Button 
+              colorScheme="green" 
+              onClick={decryptImage} 
+              isDisabled={!seed || !imageSrc}
+            >
+              이미지 복호화
+            </Button>
+          </Box>
+        </Box>
       </Box>
     </ChakraProvider>
   );
