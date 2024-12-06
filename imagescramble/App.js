@@ -52,7 +52,7 @@ export default function App() {
           <ActionButtons
             showDownload={showDownload}
             seed={seed}
-            imageSrc={imageSrc}
+            imageSrc={imageSrc}l
             scrambleImage={scrambleImage}
             decryptImage={decryptImage}
             downloadImage={downloadImage}
